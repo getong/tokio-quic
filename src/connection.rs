@@ -10,20 +10,53 @@ use tokio::{
 };
 
 use crate::backend::Driver;
+use crate::stream::{BidiStream, Readable, UniStream, Writeable};
 use crate::{
     backend::{client, server},
     error::Result,
-    stream::QuicStream,
+    stream::UncheckedQuicStream,
     Message,
 };
 
 pub trait Backend {}
+
 /// Indicates that the connection is from the client to a server.
 pub struct ToServer;
+
 impl Backend for ToServer {}
+
 /// Indicates that the connection is from the server to a client.
 pub struct ToClient;
+
 impl Backend for ToClient {}
+
+/// Sum of incoming stream types
+pub enum Incoming {
+    Bidi(BidiStream),
+    Uni(UniStream<Readable>),
+}
+
+impl Incoming {
+    pub(crate) fn from_unchecked(
+        stream: Option<UncheckedQuicStream>,
+        is_server: bool,
+    ) -> Option<Self> {
+        if let Some(stream) = stream {
+            Some(match (stream.id & 0b11, is_server) {
+                (0b10, true) | (0b11, false) => {
+                    Self::Uni(UniStream::new(stream.id, stream.rx, stream.tx))
+                }
+                (_, _) => Self::Bidi(BidiStream {
+                    id: stream.id,
+                    rx: stream.rx,
+                    tx: stream.tx,
+                }),
+            })
+        } else {
+            None
+        }
+    }
+}
 
 type AsyncStreamMap = Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message>>>>>;
 
@@ -41,9 +74,11 @@ type AsyncStreamMap = Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message>>>>>
 pub struct QuicConnection<T: Backend + Send> {
     #[allow(unused)]
     handle: JoinHandle<Result<()>>,
-    stream_map: AsyncStreamMap, // Map each stream to a `Sender`
-    message_send: UnboundedSender<Message>, // This is passed to each stream.
-    incoming_recv: UnboundedReceiver<QuicStream>,
+    stream_map: AsyncStreamMap,
+    // Map each stream to a `Sender`
+    message_send: UnboundedSender<Message>,
+    // This is passed to each stream.
+    incoming_recv: UnboundedReceiver<UncheckedQuicStream>,
     state: PhantomData<T>,
 }
 
@@ -73,22 +108,22 @@ impl QuicConnection<ToClient> {
 
     #[inline]
     /// Returns `None` if the driver has closed the stream
-    pub async fn incoming(&mut self) -> Option<QuicStream> {
-        self.incoming_recv.recv().await
+    pub async fn incoming(&mut self) -> Option<Incoming> {
+        Incoming::from_unchecked(self.incoming_recv.recv().await, true)
     }
 
     /// Opens a new bidi stream to the client.
     ///
     /// # Arguments
     /// * `id`: A 62 bit integer.
-    pub async fn bidi(&mut self, id: u64) -> Result<QuicStream> {
+    pub async fn bidi(&mut self, id: u64) -> Result<BidiStream> {
         let mut map = self.stream_map.lock().await;
         let id = (id << 2) | 0b01;
         if map.contains_key(&id) {
             return Err(super::error::Error::IdAlreadyTaken(id));
         }
         let (tx, rx) = mpsc::unbounded_channel();
-        let stream = QuicStream {
+        let stream = BidiStream {
             id,
             rx,
             tx: self.message_send.clone(),
@@ -101,18 +136,14 @@ impl QuicConnection<ToClient> {
     ///
     /// # Arguments
     /// * `id`: A 62 bit integer.
-    pub async fn uni(&mut self, id: u64) -> Result<QuicStream> {
+    pub async fn uni(&mut self, id: u64) -> Result<UniStream<Writeable>> {
         let mut map = self.stream_map.lock().await;
         let id = (id << 2) | 0b11;
         if map.contains_key(&id) {
             return Err(super::error::Error::IdAlreadyTaken(id));
         }
         let (tx, rx) = mpsc::unbounded_channel();
-        let stream = QuicStream {
-            id,
-            rx,
-            tx: self.message_send.clone(),
-        };
+        let stream = UniStream::new(id, rx, self.message_send.clone());
         map.insert(id, tx);
         Ok(stream)
     }
@@ -144,22 +175,22 @@ impl QuicConnection<ToServer> {
 
     #[inline]
     /// Returns `None` if the driver has closed the stream
-    pub async fn incoming(&mut self) -> Option<QuicStream> {
-        self.incoming_recv.recv().await
+    pub async fn incoming(&mut self) -> Option<Incoming> {
+        Incoming::from_unchecked(self.incoming_recv.recv().await, false)
     }
 
     /// Opens a new bidi stream to the server.
     ///
     /// # Arguments
     /// * `id`: A 62 bit integer.
-    pub async fn bidi(&mut self, id: u64) -> Result<QuicStream> {
+    pub async fn bidi(&mut self, id: u64) -> Result<BidiStream> {
         let mut map = self.stream_map.lock().await;
         let id = id << 2;
         if map.contains_key(&id) {
             return Err(super::error::Error::IdAlreadyTaken(id));
         }
         let (tx, rx) = mpsc::unbounded_channel();
-        let stream = QuicStream {
+        let stream = BidiStream {
             id,
             rx,
             tx: self.message_send.clone(),
@@ -173,18 +204,14 @@ impl QuicConnection<ToServer> {
     ///
     /// # Arguments
     /// * `id`: A 62 bit integer.
-    pub async fn uni(&mut self, id: u64) -> Result<QuicStream> {
+    pub async fn uni(&mut self, id: u64) -> Result<UniStream<Writeable>> {
         let mut map = self.stream_map.lock().await;
         let id = (id << 2) | 0b10;
         if map.contains_key(&id) {
             return Err(super::error::Error::IdAlreadyTaken(id));
         }
         let (tx, rx) = mpsc::unbounded_channel();
-        let stream = QuicStream {
-            id,
-            rx,
-            tx: self.message_send.clone(),
-        };
+        let stream = UniStream::new(id, rx, self.message_send.clone());
         map.insert(id, tx);
         trace!("New uni stream: {}", stream.id);
         Ok(stream)

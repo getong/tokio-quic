@@ -2,7 +2,7 @@ use super::error::Result;
 use crate::backend::timer::Timer;
 use crate::config::STREAM_BUFFER_SIZE;
 
-use crate::stream::QuicStream;
+use crate::stream::UncheckedQuicStream;
 use crate::Message;
 use quiche::Connection;
 use std::collections::HashMap;
@@ -26,7 +26,7 @@ pub(crate) struct Driver<Inner: IoHandler> {
     pub stream_map: Arc<Mutex<HashMap<u64, UnboundedSender<Result<Message>>>>>,
     pub message_recv: UnboundedReceiver<Message>,
     pub message_send: UnboundedSender<Message>,
-    pub incoming_send: UnboundedSender<QuicStream>,
+    pub incoming_send: UnboundedSender<UncheckedQuicStream>,
 }
 
 impl<Inner: IoHandler> Unpin for Driver<Inner> {}
@@ -74,7 +74,7 @@ impl<Inner: IoHandler> Future for Driver<Inner> {
                 let tx = map.entry(stream_id).or_insert_with(move || {
                     let (tx, rx) = mpsc::unbounded_channel();
                     incoming_send
-                        .send(QuicStream {
+                        .send(UncheckedQuicStream {
                             id: stream_id,
                             rx,
                             tx: message_send,

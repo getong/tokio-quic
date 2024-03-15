@@ -25,7 +25,7 @@ pub struct DataPacket {
 }
 
 /// The Manager is responsible for driving the backend operations.
-/// It collects and emits data from the channels and quic streams.
+/// It collects and emits data from the channels and `QuicStream`s.
 pub struct Manager {
     io: Arc<UdpSocket>,
     client_map: HashMap<quiche::ConnectionId<'static>, UnboundedSender<DataPacket>>,
