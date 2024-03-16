@@ -48,10 +48,13 @@ impl<Inner: IoHandler> Future for Driver<Inner> {
                         stream_id,
                         self.inner.connection().stream_send(stream_id, &bytes, fin),
                     ),
-                    Message::Close(stream_id) => (
-                        stream_id,
-                        self.inner.connection().stream_send(stream_id, &[], true),
-                    ),
+                    Message::Close(stream_id) => {
+                        self.message_recv.close();
+                        (
+                            stream_id,
+                            self.inner.connection().stream_send(stream_id, &[], true),
+                        )
+                    },
                 };
                 if let Err(err) = result {
                     let mut map = pollster::block_on(self.stream_map.lock());

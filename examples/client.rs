@@ -2,7 +2,7 @@
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_quicker::error::Result;
-use tokio_quicker::QuicSocket;
+use tokio_quicker::{QuicSocket, TryRead};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -16,8 +16,12 @@ async fn main() -> Result<()> {
     let mut stream = connection.bidi(1).await?;
     stream.write(b"./Cargo.toml").await?;
 
-    let mut buf: Vec<u8> = Vec::with_capacity(u16::MAX as usize);
-    stream.read_buf(&mut buf).await?;
+    let mut buf: Vec<u8> = Vec::with_capacity(u16::MAX as usize * 4);
+    loop {
+        if let Err(_) = stream.read_buf(&mut buf).await {
+            break;
+        }
+    }
     println!("{}", String::from_utf8_lossy(&buf));
     stream.shutdown().await?;
     Ok(())

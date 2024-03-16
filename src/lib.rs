@@ -66,14 +66,20 @@ pub mod connection;
 mod crypto;
 pub mod error;
 pub mod stream;
+mod io;
+mod async_io;
+
+pub use io::{TryRead, TryWrite};
 
 #[derive(Debug)]
+/// Passed between the backend and a stream for exchange of data.
 pub(crate) enum Message {
     Data {
         stream_id: u64,
         bytes: Vec<u8>,
         fin: bool,
     },
+    /// Contains the id of the stream to be closed
     Close(u64),
 }
 
