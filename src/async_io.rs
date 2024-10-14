@@ -1,6 +1,7 @@
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use bytes::BufMut;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use crate::Message;
 use crate::stream::{BidiStream, Readable, UniStream, Writeable};
@@ -17,8 +18,13 @@ impl AsyncRead for BidiStream {
                     if fin {
                         self.rx.close();
                     }
-                    buf.put_slice(bytes.as_slice());
-                    buf.set_filled(bytes.len());
+                    self.buffer_read.extend_from_slice(&bytes);
+                    let read_amount = buf.remaining_mut().min(self.buffer_read.len());
+                    buf.put_slice(&self.buffer_read[..read_amount]);
+                    buf.set_filled(read_amount);
+                    self.buffer_read.rotate_left(read_amount);
+                    let truncate_len = self.buffer_read.len() - read_amount;
+                    self.buffer_read.truncate(truncate_len);
                     Poll::Ready(Ok(()))
                 }
                 Ok(Message::Close(_id)) => {
@@ -38,7 +44,7 @@ impl AsyncRead for BidiStream {
 
 impl AsyncWrite for BidiStream {
     fn poll_write(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
@@ -54,7 +60,7 @@ impl AsyncWrite for BidiStream {
     }
 
     fn poll_flush(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
     ) -> Poll<Result<(), io::Error>> {
         Poll::Ready(Ok(()))
@@ -85,11 +91,16 @@ impl AsyncRead for UniStream<Readable> {
                        bytes,
                        fin,
                    }) => {
-                    buf.put_slice(bytes.as_slice());
-                    buf.set_filled(bytes.len());
                     if fin {
                         self.rx.close();
                     }
+                    self.buffer.extend_from_slice(&bytes);
+                    let read_amount = buf.remaining_mut().min(self.buffer.len());
+                    buf.put_slice(&self.buffer[..read_amount]);
+                    buf.set_filled(read_amount);
+                    self.buffer.rotate_left(read_amount);
+                    let truncate_len = self.buffer.len() - read_amount;
+                    self.buffer.truncate(truncate_len);
                     Poll::Ready(Ok(()))
                 }
                 Ok(Message::Close(_id)) => {
@@ -109,7 +120,7 @@ impl AsyncRead for UniStream<Readable> {
 
 impl AsyncWrite for UniStream<Writeable> {
     fn poll_write(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
@@ -125,7 +136,7 @@ impl AsyncWrite for UniStream<Writeable> {
     }
 
     fn poll_flush(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
     ) -> Poll<Result<(), io::Error>> {
         Poll::Ready(Ok(()))

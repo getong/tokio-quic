@@ -1,6 +1,6 @@
 use log::trace;
 use std::{collections::HashMap, marker::PhantomData, sync::Arc};
-
+use bytes::BytesMut;
 use tokio::{
     sync::{
         mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -50,6 +50,7 @@ impl Incoming {
                     id: stream.id,
                     rx: stream.rx,
                     tx: stream.tx,
+                    buffer_read: BytesMut::with_capacity(u16::MAX as usize),
                 }),
             })
         } else {
@@ -127,6 +128,7 @@ impl QuicConnection<ToClient> {
             id,
             rx,
             tx: self.message_send.clone(),
+            buffer_read: BytesMut::with_capacity(u16::MAX as usize),
         };
         map.insert(id, tx);
         Ok(stream)
@@ -194,6 +196,7 @@ impl QuicConnection<ToServer> {
             id,
             rx,
             tx: self.message_send.clone(),
+            buffer_read: BytesMut::with_capacity(u16::MAX as usize),
         };
         map.insert(id, tx);
         trace!("New bidi stream: {}", stream.id);

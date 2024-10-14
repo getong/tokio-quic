@@ -2,7 +2,7 @@
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_quicker::error::Result;
-use tokio_quicker::{QuicSocket, TryRead};
+use tokio_quicker::{QuicSocket};
 
 #[tokio::main]
 async fn main() -> Result<()> {

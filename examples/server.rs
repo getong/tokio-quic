@@ -23,6 +23,7 @@ async fn main() -> Result<()> {
                     let string =
                         fs::read_to_string(path.to_string()).unwrap_or_else(|err| err.to_string());
                     stream.write(string.as_bytes()).await.unwrap();
+                    stream.flush().await.unwrap();
                     stream.shutdown().await.unwrap();
                     println!("Shutdown!")
                 }

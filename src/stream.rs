@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 use std::{io, task::Poll};
-
+use bytes::BytesMut;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
@@ -41,6 +41,7 @@ pub struct BidiStream {
     pub(crate) id: u64,
     pub(crate) rx: UnboundedReceiver<Result<Message>>,
     pub(crate) tx: UnboundedSender<Message>,
+    pub(crate) buffer_read: BytesMut,
 }
 
 impl QuicStream for BidiStream {
@@ -55,6 +56,7 @@ impl From<UncheckedQuicStream> for BidiStream {
             id: stream.id,
             rx: stream.rx,
             tx: stream.tx,
+            buffer_read: BytesMut::with_capacity(u16::MAX as usize),
         }
     }
 }
@@ -63,6 +65,7 @@ pub struct UniStream<M: UniMode> {
     pub(crate) id: u64,
     pub(crate) rx: UnboundedReceiver<Result<Message>>,
     pub(crate) tx: UnboundedSender<Message>,
+    pub(crate) buffer: BytesMut,
     _ty: PhantomData<M>,
 }
 
@@ -82,6 +85,7 @@ impl<M: UniMode> UniStream<M> {
             id,
             rx,
             tx,
+            buffer: BytesMut::with_capacity(u16::MAX as usize),
             _ty: Default::default(),
         }
     }
